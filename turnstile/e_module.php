@@ -109,9 +109,12 @@ if($turnstileActive)
 		  
 	}
 	/* remove original captcha */
-	e107::getOverride()->replace('secure_image::r_image',     'e107turnstile::blank');
+	//if ($user_func = e107::getOverride()->check($this,'r_image'))
+	e107::getOverride()->replace('secure_image::r_image',     'e107turnstile::input');
 	e107::getOverride()->replace('secure_image::renderInput', 'e107turnstile::hiddeninput');
 	e107::getOverride()->replace('secure_image::invalidCode', 'e107turnstile::invalid');
 	e107::getOverride()->replace('secure_image::renderLabel', 'e107turnstile::blank');
-	e107::getOverride()->replace('secure_image::verify_code', 'e107turnstile::verify'); 
+	e107::getOverride()->replace('secure_image::verify_code', 'e107turnstile::verify');
+	 
+	
 }
