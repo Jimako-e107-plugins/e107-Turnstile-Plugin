@@ -93,7 +93,7 @@ if($turnstileActive)
 		 * @param $checkstr
 		 * @return bool|mixed|string
 		 */
-		function invalidinvalid($code, $other)
+		static function invalid($rec_num, $checkstr)
 		{
 	 	
 			if(self::verify($rec_num,$checkstr))

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<e107Plugin name="Turnstile Captcha" lan="" version="1.0.0" date="2025-03-01" compatibility="2.3" installRequired="true" >
+<e107Plugin name="Turnstile Captcha" lan="" version="1.0.1" date="2025-09-25" compatibility="2.3" installRequired="true" >
 	<author name="Jimako" url="https://www.e107sk.com/" />
 	<summary lan="">Turnstile Captcha for e107. </summary>
 	<description lan="">A drop-in replacement for the e107 captcha, making your site more use-friendly and secure.</description>
