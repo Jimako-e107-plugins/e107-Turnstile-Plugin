@@ -43,49 +43,46 @@ if($turnstileActive)
 		}
 		
 		static function verify($code, $other)
-		{
+{
+    if ($_SERVER['REQUEST_METHOD'] === 'POST')
+    {
+        $secretKey = e107::pref('turnstile', 'secretkey');
+        $token = $_POST['cf-turnstile-response'];
+        $ip = $_SERVER['REMOTE_ADDR'];
 
-			if ($_SERVER['REQUEST_METHOD'] === 'POST')
-			{
-				$secretKey = e107::pref('turnstile', 'secretkey'); // Replace with your Secret Key
-				$token = $_POST['cf-turnstile-response']; // The response token from Turnstile
-				$ip = $_SERVER['REMOTE_ADDR']; // User's IP address
+        $url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
-				// Send a POST request to Cloudflare's Turnstile API
-				$url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
-				$data = [
-					'secret' => $secretKey,
-					'response' => $token,
-					'remoteip' => $ip,
-				];
+        $data = [
+            'secret'   => $secretKey,
+            'response' => $token,
+            'remoteip' => $ip,
+        ];
 
-				$options = [
-					'http' => [
-						'header' => "Content-type: application/x-www-form-urlencoded\r\n",
-						'method' => 'POST',
-						'content' => http_build_query($data),
-					],
-				];
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/x-www-form-urlencoded'
+        ]);
 
-				$context = stream_context_create($options);
-				$result = file_get_contents($url, false, $context);
-				$response = json_decode($result, true);
+        $result = curl_exec($ch);
+        curl_close($ch);
 
-				if ($response['success'])
-				{
-					// CAPTCHA validation succeeded
-					// Process the form submission
-					return true;
-				}
-				else
-				{
-					// CAPTCHA validation failed
-					// Handle the error (e.g., show an error message)
-					$error = 'CAPTCHA validation failed. Please try again.';
-					return false;
-				}
-			}
-		}
+        $response = json_decode($result, true);
+
+        if (!empty($response['success']) && $response['success'] === true)
+        {
+            return true;
+        }
+        else
+        {
+            // Puedes registrar $response['error-codes'] para depuración
+            return false;
+        }
+    }
+}
+
 
 		// Return an Error message (true) if check fails, otherwise return false. 
 		/**
