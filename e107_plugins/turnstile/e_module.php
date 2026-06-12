@@ -1,120 +1,175 @@
 <?php
 /*
- * e107 website system
- *
- * Copyright (C) 2008-2012 e107 Inc (e107.org)
- * Released under the terms and conditions of the
- * GNU General Public License (http://www.gnu.org/licenses/gpl.txt)
- *
- * 
+ * Turnstile Captcha for e107 - replaces the core captcha with
+ * Cloudflare Turnstile (https://developers.cloudflare.com/turnstile/).
  */
 
-$turnstileActive = e107::pref('turnstile', 'active');
-$turnstileSiteKey = e107::pref('turnstile', 'sitekey');
-$turnstileSecretKey = e107::pref('turnstile', 'secretkey');
- 
-if($turnstileActive)
-{	 	 
-	class e107turnstile 
+if (!defined('e107_INIT'))
+{
+	exit;
+}
+
+if (e107::pref('turnstile', 'active'))
+{
+	class e107turnstile
 	{
-	
-		public function __construct()
-	    {
-		    e107::lan('turnstile', false, true);
-	  	}
-	    
+
+		/**
+		 * True when the captcha should not be shown to (and not verified for)
+		 * the current, logged-in user.
+		 *
+		 * @return bool
+		 */
+		static function hiddenForCurrentUser()
+		{
+			return USER && e107::pref('turnstile', 'hidefrommembers');
+		}
+
+
 		static function blank()
 		{
-			return ;
+			return '';
 		}
-	 
+
+
 		static function input()
 		{
- 			$text = '<div class="cf-turnstile" data-sitekey="' . e107::pref('turnstile', 'sitekey') . '"></div>';
-			return $text;
+			if (self::hiddenForCurrentUser())
+			{
+				return '';
+			}
+
+			$sitekey = e107::getParser()->toAttribute(e107::pref('turnstile', 'sitekey'));
+
+			return '<div class="cf-turnstile" data-sitekey="' . $sitekey . '"></div>';
 		}
-		
+
+
 		static function hiddeninput()
-		{	 
-			$frm = e107::getForm();	
-            $element = '<input type="hidden" name="cf-turnstile-response" value="your-verification-token">';
-            $element .= $frm->hidden("rand_num", 'google' );
-			return "";
-		}
-		
-		static function verify($code, $other)
 		{
-
-			if ($_SERVER['REQUEST_METHOD'] === 'POST')
-			{
-				$secretKey = e107::pref('turnstile', 'secretkey'); // Replace with your Secret Key
-				$token = $_POST['cf-turnstile-response']; // The response token from Turnstile
-				$ip = $_SERVER['REMOTE_ADDR']; // User's IP address
-
-				// Send a POST request to Cloudflare's Turnstile API
-				$url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
-				$data = [
-					'secret' => $secretKey,
-					'response' => $token,
-					'remoteip' => $ip,
-				];
-
-				$options = [
-					'http' => [
-						'header' => "Content-type: application/x-www-form-urlencoded\r\n",
-						'method' => 'POST',
-						'content' => http_build_query($data),
-					],
-				];
-
-				$context = stream_context_create($options);
-				$result = file_get_contents($url, false, $context);
-				$response = json_decode($result, true);
-
-				if ($response['success'])
-				{
-					// CAPTCHA validation succeeded
-					// Process the form submission
-					return true;
-				}
-				else
-				{
-					// CAPTCHA validation failed
-					// Handle the error (e.g., show an error message)
-					$error = 'CAPTCHA validation failed. Please try again.';
-					return false;
-				}
-			}
+			// The Turnstile widget injects its own hidden 'cf-turnstile-response'
+			// input into the form; the core text input is suppressed.
+			return '';
 		}
 
-		// Return an Error message (true) if check fails, otherwise return false. 
+
 		/**
-		 * @param $rec_num
-		 * @param $checkstr
-		 * @return bool|mixed|string
+		 * Verifies the Turnstile response token against Cloudflare's API.
+		 * Fails closed: any missing token, network failure or unexpected
+		 * response means the captcha is NOT accepted.
+		 *
+		 * @param mixed $code  unused - kept for override signature
+		 * @param mixed $other unused - kept for override signature
+		 * @return bool
 		 */
-		static function invalid($rec_num, $checkstr)
+		static function verify($code = null, $other = null)
 		{
-	 	
-			if(self::verify($rec_num,$checkstr))
+			if ($_SERVER['REQUEST_METHOD'] !== 'POST')
 			{
-				return false;	
+				return false;
 			}
-			else
+
+			// widget is hidden for members - there is no token to verify
+			if (self::hiddenForCurrentUser())
 			{
-				return 'You did not pass robot test';	
-			}		
-	
+				return true;
+			}
+
+			$secretKey = e107::pref('turnstile', 'secretkey');
+			$token = isset($_POST['cf-turnstile-response']) ? $_POST['cf-turnstile-response'] : '';
+
+			if (empty($secretKey) || empty($token) || !is_string($token))
+			{
+				return false;
+			}
+
+			$url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+			$data = array(
+				'secret'   => $secretKey,
+				'response' => $token,
+				'remoteip' => e107::getIPHandler()->getIP(false),
+			);
+
+			$result = self::request($url, $data);
+
+			if ($result === false)
+			{
+				e107::getLog()->add('Turnstile verification request failed',
+					'Could not reach the Cloudflare siteverify endpoint.',
+					E_LOG_WARNING, 'TURNSTILE_01');
+
+				return false;
+			}
+
+			$response = json_decode($result, true);
+
+			return !empty($response['success']);
 		}
-		  
+
+
+		/**
+		 * POSTs $data to $url; uses curl when available, falls back to
+		 * a stream context. Returns the response body or false.
+		 *
+		 * @param string $url
+		 * @param array  $data
+		 * @return string|false
+		 */
+		static function request($url, $data)
+		{
+			if (function_exists('curl_init'))
+			{
+				$ch = curl_init($url);
+				curl_setopt_array($ch, array(
+					CURLOPT_POST           => true,
+					CURLOPT_POSTFIELDS     => http_build_query($data),
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_TIMEOUT        => 10,
+					CURLOPT_CONNECTTIMEOUT => 5,
+				));
+				$result = curl_exec($ch);
+				curl_close($ch);
+
+				return $result;
+			}
+
+			$options = array(
+				'http' => array(
+					'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+					'method'  => 'POST',
+					'content' => http_build_query($data),
+					'timeout' => 10,
+				),
+			);
+
+			return @file_get_contents($url, false, stream_context_create($options));
+		}
+
+
+		/**
+		 * Returns an error message (truthy) if the check fails,
+		 * otherwise returns false.
+		 *
+		 * @param mixed $code
+		 * @param mixed $other
+		 * @return bool|string
+		 */
+		static function invalid($code = null, $other = null)
+		{
+			if (self::verify($code, $other))
+			{
+				return false;
+			}
+
+			return defined('LAN_INVALID_CODE') ? LAN_INVALID_CODE : 'You did not pass the robot test.';
+		}
+
 	}
-	/* remove original captcha */
-	//if ($user_func = e107::getOverride()->check($this,'r_image'))
+
+	/* replace original captcha */
 	e107::getOverride()->replace('secure_image::r_image',     'e107turnstile::input');
 	e107::getOverride()->replace('secure_image::renderInput', 'e107turnstile::hiddeninput');
 	e107::getOverride()->replace('secure_image::invalidCode', 'e107turnstile::invalid');
 	e107::getOverride()->replace('secure_image::renderLabel', 'e107turnstile::blank');
 	e107::getOverride()->replace('secure_image::verify_code', 'e107turnstile::verify');
-	 
-	
 }
